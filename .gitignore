@@ -1,0 +1,13 @@
+.idea
+*.iml
+throw.txt
+throw.json
+.env
+id_rsa
+.vscode
+tools_build
+cover.out
+coverage.out
+deployment-runner
+go.work
+go.work.sum
