@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecsTypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/deployment-io/deployment-runner-aws-controller/client"
+	"github.com/deployment-io/deployment-runner-aws-controller/utils"
 	"github.com/deployment-io/deployment-runner-kit/jobs"
 	"github.com/joho/godotenv"
 	"os"
@@ -18,7 +19,7 @@ import (
 
 var clientCertPem, clientKeyPem string
 
-func getEnvironment() (service, organizationId, token, region, dockerImage, cpuStr, memory, taskExecutionRoleArn, taskRoleArn string) {
+func getEnvironment() (service, organizationId, token, region, dockerImage, dockerRunnerImage, cpuStr, memory, taskExecutionRoleArn, taskRoleArn string) {
 	//load .env ignoring err
 	_ = godotenv.Load()
 	organizationId = os.Getenv("OrganizationID")
@@ -26,6 +27,7 @@ func getEnvironment() (service, organizationId, token, region, dockerImage, cpuS
 	token = os.Getenv("Token")
 	region = os.Getenv("Region")
 	dockerImage = os.Getenv("DockerImage")
+	dockerRunnerImage = os.Getenv("DockerRunnerImage")
 	cpuStr = os.Getenv("CpuArch")
 	memory = os.Getenv("Memory")
 	taskExecutionRoleArn = os.Getenv("ExecutionRoleArn")
@@ -91,7 +93,7 @@ func isDeploymentRunnerLive(region, cpuStr string) (bool, error) {
 
 }
 
-func updateDeploymentRunner(region, cpuStr, organizationId string, startOrStop bool) error {
+func startOrStopDeploymentRunner(region, cpuStr, organizationId string, start bool) error {
 	asgClient, err := getAsgClient(region)
 	if err != nil {
 		return err
@@ -100,7 +102,7 @@ func updateDeploymentRunner(region, cpuStr, organizationId string, startOrStop b
 	deploymentRunnerAsgName := getDeploymentRunnerAsgName(cpuStr)
 
 	var desiredCapacity int32 = 1
-	if !startOrStop {
+	if !start {
 		desiredCapacity = 0
 	}
 
@@ -119,7 +121,7 @@ func updateDeploymentRunner(region, cpuStr, organizationId string, startOrStop b
 	}
 
 	var desiredCount int32 = 1
-	if !startOrStop {
+	if !start {
 		desiredCount = 0
 	}
 
@@ -142,7 +144,7 @@ func updateDeploymentRunner(region, cpuStr, organizationId string, startOrStop b
 }
 
 func main() {
-	service, organizationId, token, region, dockerImage, cpuStr, _, _, _ := getEnvironment()
+	service, organizationId, token, region, dockerImage, dockerRunnerImage, cpuStr, memory, taskExecutionRoleArn, taskRoleArn := getEnvironment()
 	client.Connect(service, organizationId, token, clientCertPem, clientKeyPem, dockerImage, false)
 	c := client.Get()
 	shutdownSignal := make(chan struct{})
@@ -165,7 +167,7 @@ func main() {
 				continue
 			}
 			//check jobs count
-			pendingJobsCount, err := c.GetPendingJobsCount()
+			pendingJobsCount, runnerOnTimeoutSeconds, err := c.GetPendingJobsCount()
 			if err != nil {
 				time.Sleep(10 * time.Second)
 				continue
@@ -174,23 +176,30 @@ func main() {
 			if deploymentRunnerLive {
 				if noPendingJobs {
 					//switch off
-					err = updateDeploymentRunner(region, cpuStr, organizationId, false)
+					err = startOrStopDeploymentRunner(region, cpuStr, organizationId, false)
 					if err == nil {
 						deploymentRunnerLive = false
 					}
 				}
 			} else {
-				if !noPendingJobs {
+				if noPendingJobs {
+					//no pending jobs - upgrade deployment runner to upgraded image
+					dockerRunnerImage, err = utils.UpgradeDeploymentRunner(service, organizationId, token, region, dockerRunnerImage,
+						cpuStr, memory, taskExecutionRoleArn, taskRoleArn)
+					if err != nil {
+						fmt.Println(err.Error())
+					}
+				} else {
 					//switch on
-					err = updateDeploymentRunner(region, cpuStr, organizationId, true)
+					err = startOrStopDeploymentRunner(region, cpuStr, organizationId, true)
 					if err == nil {
 						deploymentRunnerLive = true
 					}
 				}
 			}
-			timeout := 30 * time.Minute
-			if !deploymentRunnerLive {
-				timeout = 2 * time.Second
+			timeout := 2 * time.Second
+			if deploymentRunnerLive {
+				timeout = time.Duration(runnerOnTimeoutSeconds) * time.Second
 			}
 			time.Sleep(timeout)
 		}

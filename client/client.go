@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/deployment-io/deployment-runner-aws-controller/utils"
 	"log"
 	"net/rpc"
 	"strings"
@@ -97,7 +98,7 @@ func Connect(service, organizationID, token, clientCertPem, clientKeyPem, docker
 							connect(service, organizationID, token, clientCertPem, clientKeyPem, dockerImage)
 						}
 						if client.c != nil {
-							_, _, _, err := client.Ping(firstPing)
+							dockerUpgradeImage, upgradeFromTs, upgradeToTs, err := client.Ping(firstPing)
 							if err != nil {
 								client.isConnected = false
 								client.c.Close()
@@ -115,7 +116,7 @@ func Connect(service, organizationID, token, clientCertPem, clientKeyPem, docker
 									}
 								}
 								//set upgrade data
-								//utils.UpgradeData.Set(dockerUpgradeImage, upgradeFromTs, upgradeToTs)
+								utils.UpgradeData.Set(dockerUpgradeImage, upgradeFromTs, upgradeToTs)
 							}
 						} else {
 							client.isConnected = false

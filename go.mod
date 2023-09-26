@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.18.41
 	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.30.6
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.30.1
-	github.com/deployment-io/deployment-runner-kit v0.0.0-20230923091854-29542045a78f
+	github.com/deployment-io/deployment-runner-kit v0.0.0-20230926072324-b4f3af3b9920
 	github.com/joho/godotenv v1.5.1
 )
 
