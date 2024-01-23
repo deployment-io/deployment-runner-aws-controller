@@ -20,6 +20,8 @@ type RunnerClient struct {
 	organizationID     string
 	token              string
 	currentDockerImage string
+	runnerRegion       string
+	awsAccountID       string
 }
 
 func getTlsClient(service, clientCertPem, clientKeyPem string) (*rpc.Client, error) {
@@ -51,7 +53,7 @@ func getTlsClient(service, clientCertPem, clientKeyPem string) (*rpc.Client, err
 
 var client = RunnerClient{}
 
-func connect(service, organizationID, token, clientCertPem, clientKeyPem, dockerImage string) (err error) {
+func connect(service, organizationID, token, clientCertPem, clientKeyPem, dockerImage, region, awsAccountID string) (err error) {
 	var c *rpc.Client
 	if !client.isConnected {
 		if len(clientCertPem) > 0 && len(clientKeyPem) > 0 {
@@ -70,6 +72,8 @@ func connect(service, organizationID, token, clientCertPem, clientKeyPem, docker
 		client.c = c
 		client.organizationID = organizationID
 		client.token = token
+		client.runnerRegion = region
+		client.awsAccountID = awsAccountID
 		client.currentDockerImage = dockerImage
 	}
 
@@ -78,7 +82,8 @@ func connect(service, organizationID, token, clientCertPem, clientKeyPem, docker
 
 var disconnectSignal = make(chan struct{})
 
-func Connect(service, organizationID, token, clientCertPem, clientKeyPem, dockerImage string, blockTillFirstConnect bool) chan struct{} {
+func Connect(service, organizationID, token, clientCertPem, clientKeyPem, dockerImage, region, awsAccountID string,
+	blockTillFirstConnect bool) chan struct{} {
 	firstTimeConnectSignal := make(chan struct{})
 	if !client.isStarted {
 		client.Lock()
@@ -95,10 +100,10 @@ func Connect(service, organizationID, token, clientCertPem, clientKeyPem, docker
 					default:
 						isConnectedOld := client.isConnected
 						if !client.isConnected {
-							connect(service, organizationID, token, clientCertPem, clientKeyPem, dockerImage)
+							connect(service, organizationID, token, clientCertPem, clientKeyPem, dockerImage, region, awsAccountID)
 						}
 						if client.c != nil {
-							dockerUpgradeImage, upgradeFromTs, upgradeToTs, err := client.Ping(firstPing)
+							runnerUpgradeDockerImage, controllerUpgradeDockerImage, upgradeFromTs, upgradeToTs, err := client.Ping(firstPing)
 							if err != nil {
 								client.isConnected = false
 								client.c.Close()
@@ -116,7 +121,7 @@ func Connect(service, organizationID, token, clientCertPem, clientKeyPem, docker
 									}
 								}
 								//set upgrade data
-								utils.UpgradeData.Set(dockerUpgradeImage, upgradeFromTs, upgradeToTs)
+								utils.UpgradeData.Set(runnerUpgradeDockerImage, controllerUpgradeDockerImage, upgradeFromTs, upgradeToTs)
 							}
 						} else {
 							client.isConnected = false

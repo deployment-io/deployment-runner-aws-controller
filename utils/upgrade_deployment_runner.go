@@ -14,23 +14,26 @@ import (
 
 type UpgradeDataType struct {
 	sync.Mutex
-	DockerUpgradeImage string
-	UpgradeFromTs      int64
-	UpgradeToTs        int64
+	RunnerUpgradeDockerImage     string
+	ControllerUpgradeDockerImage string
+	UpgradeFromTs                int64
+	UpgradeToTs                  int64
 }
 
-func (u *UpgradeDataType) Set(dockerUpgradeImage string, upgradeFromTs, upgradeToTs int64) {
+func (u *UpgradeDataType) Set(runnerUpgradeDockerImage, controllerUpgradeDockerImage string, upgradeFromTs, upgradeToTs int64) {
 	u.Lock()
 	defer u.Unlock()
 	u.UpgradeFromTs = upgradeFromTs
 	u.UpgradeToTs = upgradeToTs
-	u.DockerUpgradeImage = dockerUpgradeImage
+	u.RunnerUpgradeDockerImage = runnerUpgradeDockerImage
+	u.ControllerUpgradeDockerImage = controllerUpgradeDockerImage
 }
 
-func (u *UpgradeDataType) Get() (dockerUpgradeImage string, upgradeFromTs, upgradeToTs int64) {
+func (u *UpgradeDataType) Get() (runnerUpgradeDockerImage, controllerUpgradeDockerImage string, upgradeFromTs, upgradeToTs int64) {
 	u.Lock()
 	defer u.Unlock()
-	dockerUpgradeImage = u.DockerUpgradeImage
+	runnerUpgradeDockerImage = u.RunnerUpgradeDockerImage
+	controllerUpgradeDockerImage = u.ControllerUpgradeDockerImage
 	upgradeFromTs = u.UpgradeFromTs
 	upgradeToTs = u.UpgradeToTs
 	return
@@ -38,9 +41,11 @@ func (u *UpgradeDataType) Get() (dockerUpgradeImage string, upgradeFromTs, upgra
 
 var UpgradeData = UpgradeDataType{}
 
-func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, organizationId, token, region, dockerImage, cpuStr, memory, taskExecutionRoleArn, taskRoleArn string) (taskDefinitionArn string, err error) {
+func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, organizationId, token, region, dockerImage,
+	osStr, cpuStr, memory, taskExecutionRoleArn, taskRoleArn, awsAccountID string) (taskDefinitionArn string, err error) {
 
-	runnerName := fmt.Sprintf("deployment-runner-%s", cpuStr)
+	osCpuStr := fmt.Sprintf("%s%s", osStr, cpuStr)
+	runnerName := fmt.Sprintf("dr-%s-%s-%s", osCpuStr, organizationId, region)
 
 	tags := strings.Split(dockerImage, ":")
 	tag := "unknown"
@@ -49,7 +54,7 @@ func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, orga
 	}
 
 	logsStreamPrefix := tag
-	logGroupName := fmt.Sprintf("deployment-runner-logs-group-%s", cpuStr)
+	logGroupName := fmt.Sprintf("dr-logs-group-%s", osCpuStr)
 
 	envVars := []ecsTypes.KeyValuePair{
 		{
@@ -73,10 +78,6 @@ func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, orga
 			Value: aws.String(region),
 		},
 		{
-			Name:  aws.String("CpuArch"),
-			Value: aws.String(cpuStr),
-		},
-		{
 			Name:  aws.String("Memory"),
 			Value: aws.String(memory),
 		},
@@ -87,6 +88,10 @@ func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, orga
 		{
 			Name:  aws.String("TaskRoleArn"),
 			Value: aws.String(taskRoleArn),
+		},
+		{
+			Name:  aws.String("AWSAccountID"),
+			Value: aws.String(awsAccountID),
 		},
 	}
 
@@ -129,6 +134,11 @@ func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, orga
 		cpuArch = ecsTypes.CPUArchitectureArm64
 	}
 
+	osFamily := ecsTypes.OSFamilyLinux
+	if osStr == "windows" {
+		osFamily = ecsTypes.OSFamilyWindowsServer2022Core
+	}
+
 	registerTaskDefinitionInput := &ecs.RegisterTaskDefinitionInput{
 		ContainerDefinitions: []ecsTypes.ContainerDefinition{
 			containerDefinition,
@@ -139,7 +149,7 @@ func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, orga
 		NetworkMode:      ecsTypes.NetworkModeHost,
 		RuntimePlatform: &ecsTypes.RuntimePlatform{
 			CpuArchitecture:       cpuArch,
-			OperatingSystemFamily: ecsTypes.OSFamilyLinux,
+			OperatingSystemFamily: osFamily,
 		},
 		Tags: []ecsTypes.Tag{
 			{
@@ -175,10 +185,13 @@ func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, orga
 	return taskDefinitionArn, nil
 }
 
-func updateDeploymentRunnerService(ecsClient *ecs.Client, organizationId, cpuStr, taskDefinitionArn string) error {
-	ccName := fmt.Sprintf("deployment-runner-capacity-provider-%s", cpuStr)
-	ecsClusterName := fmt.Sprintf("deployment-runner-%s-%s", cpuStr, organizationId)
-	ecsServiceName := fmt.Sprintf("deployment-runner-%s", cpuStr)
+func updateDeploymentRunnerService(ecsClient *ecs.Client, organizationId, osStr, cpuStr, taskDefinitionArn, region string) error {
+	osCpuStr := fmt.Sprintf("%s%s", osStr, cpuStr)
+
+	ccName := fmt.Sprintf("dr-capacity-provider-%s-%s-%s", osCpuStr, organizationId, region)
+	ecsClusterName := fmt.Sprintf("dr-%s-%s", osCpuStr, organizationId)
+	ecsServiceName := fmt.Sprintf("dr-%s-%s-%s", osCpuStr, organizationId, region)
+
 	updateServiceInput := &ecs.UpdateServiceInput{
 		CapacityProviderStrategy: []ecsTypes.CapacityProviderStrategyItem{{
 			CapacityProvider: aws.String(ccName),
@@ -200,33 +213,34 @@ func updateDeploymentRunnerService(ecsClient *ecs.Client, organizationId, cpuStr
 	return err
 }
 
-func UpgradeDeploymentRunner(service, organizationId, token, region, dockerImage, cpuStr, memory, taskExecutionRoleArn, taskRoleArn string) (string, error) {
-	dockerUpgradeImage, upgradeFromTs, upgradeToTs := UpgradeData.Get()
+func UpgradeDeploymentRunner(service, organizationId, token, region, runnerDockerImage, osStr, cpuStr, memory, taskExecutionRoleArn, taskRoleArn, awsAccountID string) (string, error) {
+	runnerUpgradeDockerImage, _, upgradeFromTs, upgradeToTs := UpgradeData.Get()
 	now := time.Now().Unix()
 	if now > upgradeFromTs && now < upgradeToTs {
-		if len(dockerUpgradeImage) > 0 && dockerImage != dockerUpgradeImage {
+		if len(runnerUpgradeDockerImage) > 0 && runnerDockerImage != runnerUpgradeDockerImage {
 			//upgrade deployment runner to upgraded image
 			cfg, err := config.LoadDefaultConfig(context.TODO())
 			if err != nil {
-				return dockerImage, err
+				return runnerDockerImage, err
 			}
 			ecsClient := ecs.NewFromConfig(cfg, func(o *ecs.Options) {
 				o.Region = region
 			})
 
 			//register new task definition
-			taskDefinitionArn, err := registerDeploymentRunnerTaskDefinition(ecsClient, service, organizationId, token, region, dockerUpgradeImage, cpuStr, memory, taskExecutionRoleArn, taskRoleArn)
+			taskDefinitionArn, err := registerDeploymentRunnerTaskDefinition(ecsClient, service, organizationId, token,
+				region, runnerUpgradeDockerImage, osStr, cpuStr, memory, taskExecutionRoleArn, taskRoleArn, awsAccountID)
 			if err != nil {
-				return dockerImage, err
+				return runnerDockerImage, err
 			}
 
 			//update service
-			err = updateDeploymentRunnerService(ecsClient, organizationId, cpuStr, taskDefinitionArn)
+			err = updateDeploymentRunnerService(ecsClient, organizationId, osStr, cpuStr, taskDefinitionArn, region)
 			if err != nil {
-				return dockerImage, err
+				return runnerDockerImage, err
 			}
-			return dockerUpgradeImage, nil
+			return runnerUpgradeDockerImage, nil
 		}
 	}
-	return dockerImage, nil
+	return runnerDockerImage, nil
 }
