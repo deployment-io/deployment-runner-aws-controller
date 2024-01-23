@@ -8,7 +8,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.18.41
 	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.30.6
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.30.1
-	github.com/deployment-io/deployment-runner-kit v0.0.0-20230926072324-b4f3af3b9920
+	github.com/aws/aws-sdk-go-v2/service/sts v1.22.0
+	github.com/deployment-io/deployment-runner-kit v0.0.0-20240122100719-6fcd31b1cae8
 	github.com/joho/godotenv v1.5.1
 )
 
@@ -21,7 +22,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.9.35 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.14.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.17.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.22.0 // indirect
 	github.com/aws/smithy-go v1.14.2 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	go.mongodb.org/mongo-driver v1.11.6 // indirect

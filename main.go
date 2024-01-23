@@ -9,17 +9,24 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/autoscaling"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecsTypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/deployment-io/deployment-runner-aws-controller/client"
 	"github.com/deployment-io/deployment-runner-aws-controller/utils"
+	"github.com/deployment-io/deployment-runner-kit/enums/cpu_architecture_enums"
+	"github.com/deployment-io/deployment-runner-kit/enums/os_enums"
 	"github.com/deployment-io/deployment-runner-kit/jobs"
 	"github.com/joho/godotenv"
+	"log"
 	"os"
+	"runtime"
+	"strings"
 	"time"
 )
 
 var clientCertPem, clientKeyPem string
 
-func getEnvironment() (service, organizationId, token, region, dockerImage, dockerRunnerImage, cpuStr, memory, taskExecutionRoleArn, taskRoleArn string) {
+func getEnvironment() (service, organizationId, token, region, dockerImage, dockerRunnerImage, memory,
+	taskExecutionRoleArn, taskRoleArn, awsAccountID string) {
 	//load .env ignoring err
 	_ = godotenv.Load()
 	organizationId = os.Getenv("OrganizationID")
@@ -28,11 +35,10 @@ func getEnvironment() (service, organizationId, token, region, dockerImage, dock
 	region = os.Getenv("Region")
 	dockerImage = os.Getenv("DockerImage")
 	dockerRunnerImage = os.Getenv("DockerRunnerImage")
-	cpuStr = os.Getenv("CpuArch")
 	memory = os.Getenv("Memory")
 	taskExecutionRoleArn = os.Getenv("ExecutionRoleArn")
 	taskRoleArn = os.Getenv("TaskRoleArn")
-
+	awsAccountID = os.Getenv("AWSAccountID")
 	return
 }
 
@@ -61,17 +67,18 @@ func getEcsClient(region string) (*ecs.Client, error) {
 	return ecsClient, nil
 }
 
-func getDeploymentRunnerAsgName(cpuStr string) string {
-	return fmt.Sprintf("deployment-runner-asg-%s", cpuStr)
+func getDeploymentRunnerAsgName(osStr, cpuStr, organizationID, region string) string {
+	osCpuStr := fmt.Sprintf("%s%s", osStr, cpuStr)
+	return fmt.Sprintf("dr-asg-%s-%s-%s", osCpuStr, organizationID, region)
 }
 
-func isDeploymentRunnerLive(region, cpuStr string) (bool, error) {
+func isDeploymentRunnerLive(region, osStr, cpuStr, organizationID string) (bool, error) {
 	asgClient, err := getAsgClient(region)
 	if err != nil {
 		return false, err
 	}
 
-	deploymentRunnerAsgName := getDeploymentRunnerAsgName(cpuStr)
+	deploymentRunnerAsgName := getDeploymentRunnerAsgName(osStr, cpuStr, organizationID, region)
 
 	describeAutoScalingGroupsOutput, err := asgClient.DescribeAutoScalingGroups(context.TODO(), &autoscaling.DescribeAutoScalingGroupsInput{
 		AutoScalingGroupNames: []string{deploymentRunnerAsgName},
@@ -93,13 +100,13 @@ func isDeploymentRunnerLive(region, cpuStr string) (bool, error) {
 
 }
 
-func startOrStopDeploymentRunner(region, cpuStr, organizationId string, start bool) error {
+func startOrStopDeploymentRunner(region, osStr, cpuStr, organizationId string, start bool) error {
 	asgClient, err := getAsgClient(region)
 	if err != nil {
 		return err
 	}
 
-	deploymentRunnerAsgName := getDeploymentRunnerAsgName(cpuStr)
+	deploymentRunnerAsgName := getDeploymentRunnerAsgName(osStr, cpuStr, organizationId, region)
 
 	var desiredCapacity int32 = 1
 	if !start {
@@ -125,8 +132,9 @@ func startOrStopDeploymentRunner(region, cpuStr, organizationId string, start bo
 		desiredCount = 0
 	}
 
-	ecsServiceName := fmt.Sprintf("deployment-runner-%s", cpuStr)
-	ecsClusterName := fmt.Sprintf("deployment-runner-%s-%s", cpuStr, organizationId)
+	osCpuStr := fmt.Sprintf("%s%s", osStr, cpuStr)
+	ecsServiceName := fmt.Sprintf("dr-%s-%s-%s", osCpuStr, organizationId, region)
+	ecsClusterName := fmt.Sprintf("dr-%s-%s", osCpuStr, organizationId)
 
 	updateServiceInput := &ecs.UpdateServiceInput{
 		Service:       aws.String(ecsServiceName),
@@ -144,8 +152,43 @@ func startOrStopDeploymentRunner(region, cpuStr, organizationId string, start bo
 }
 
 func main() {
-	service, organizationId, token, region, dockerImage, dockerRunnerImage, cpuStr, memory, taskExecutionRoleArn, taskRoleArn := getEnvironment()
-	client.Connect(service, organizationId, token, clientCertPem, clientKeyPem, dockerImage, false)
+	service, organizationId, token, region, dockerImage, runnerDockerImage, memory, taskExecutionRoleArn,
+		taskRoleArn, awsAccountID := getEnvironment()
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		log.Fatal(err)
+	}
+	stsClient := sts.NewFromConfig(cfg, func(options *sts.Options) {
+		options.Region = region
+	})
+
+	//aws case - check account validity
+	getCallerIdentityOutput, err := stsClient.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	if awsAccountID != aws.ToString(getCallerIdentityOutput.Account) {
+		log.Fatalf("Invalid AWS account ID")
+	}
+
+	goarch := runtime.GOARCH
+	archEnum := cpu_architecture_enums.AMD
+	if strings.HasPrefix(goarch, "arm") {
+		archEnum = cpu_architecture_enums.ARM
+	}
+
+	cpuStr := archEnum.String()
+
+	goos := runtime.GOOS
+	osType := os_enums.LINUX
+	if strings.HasPrefix(goos, "windows") {
+		osType = os_enums.WINDOWS
+	}
+
+	osStr := osType.String()
+
+	client.Connect(service, organizationId, token, clientCertPem, clientKeyPem, dockerImage, region, awsAccountID,
+		false)
 	c := client.Get()
 	shutdownSignal := make(chan struct{})
 	goShutdownHook.ADD(func() {
@@ -161,7 +204,7 @@ func main() {
 		case <-shutdownSignal:
 			shutdown = true
 		default:
-			deploymentRunnerLive, err := isDeploymentRunnerLive(region, cpuStr)
+			deploymentRunnerLive, err := isDeploymentRunnerLive(region, osStr, cpuStr, organizationId)
 			if err != nil {
 				time.Sleep(10 * time.Second)
 				continue
@@ -176,7 +219,7 @@ func main() {
 			if deploymentRunnerLive {
 				if noPendingJobs {
 					//switch off
-					err = startOrStopDeploymentRunner(region, cpuStr, organizationId, false)
+					err = startOrStopDeploymentRunner(region, osStr, cpuStr, organizationId, false)
 					if err == nil {
 						deploymentRunnerLive = false
 					}
@@ -184,14 +227,14 @@ func main() {
 			} else {
 				if noPendingJobs {
 					//no pending jobs - upgrade deployment runner to upgraded image
-					dockerRunnerImage, err = utils.UpgradeDeploymentRunner(service, organizationId, token, region, dockerRunnerImage,
-						cpuStr, memory, taskExecutionRoleArn, taskRoleArn)
+					runnerDockerImage, err = utils.UpgradeDeploymentRunner(service, organizationId, token, region, runnerDockerImage,
+						osStr, cpuStr, memory, taskExecutionRoleArn, taskRoleArn, awsAccountID)
 					if err != nil {
 						fmt.Println(err.Error())
 					}
 				} else {
 					//switch on
-					err = startOrStopDeploymentRunner(region, cpuStr, organizationId, true)
+					err = startOrStopDeploymentRunner(region, osStr, cpuStr, organizationId, true)
 					if err == nil {
 						deploymentRunnerLive = true
 					}
