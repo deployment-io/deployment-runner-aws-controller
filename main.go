@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/deployment-io/deployment-runner-aws-controller/client"
 	"github.com/deployment-io/deployment-runner-aws-controller/utils"
+	"github.com/deployment-io/deployment-runner-kit/cloud_api_clients"
 	"github.com/deployment-io/deployment-runner-kit/enums/cpu_architecture_enums"
 	"github.com/deployment-io/deployment-runner-kit/enums/iam_policy_enums"
 	"github.com/deployment-io/deployment-runner-kit/enums/os_enums"
@@ -44,38 +45,13 @@ func getEnvironment() (service, organizationId, token, region, dockerImage, dock
 	return
 }
 
-func getAsgClient(region string) (*autoscaling.Client, error) {
-	cfg, err := config.LoadDefaultConfig(context.TODO())
-	if err != nil {
-		return nil, err
-	}
-
-	asgClient := autoscaling.NewFromConfig(cfg, func(options *autoscaling.Options) {
-		options.Region = region
-	})
-
-	return asgClient, nil
-}
-
-func getEcsClient(region string) (*ecs.Client, error) {
-	cfg, err := config.LoadDefaultConfig(context.TODO())
-	if err != nil {
-		return nil, err
-	}
-
-	ecsClient := ecs.NewFromConfig(cfg, func(o *ecs.Options) {
-		o.Region = region
-	})
-	return ecsClient, nil
-}
-
 func getDeploymentRunnerAsgName(osStr, cpuStr, organizationID, region string) string {
 	osCpuStr := fmt.Sprintf("%s%s", osStr, cpuStr)
 	return fmt.Sprintf("dr-asg-%s-%s-%s", osCpuStr, organizationID, region)
 }
 
 func isDeploymentRunnerLive(region, osStr, cpuStr, organizationID string) (bool, error) {
-	asgClient, err := getAsgClient(region)
+	asgClient, err := cloud_api_clients.GetAsgClient(region)
 	if err != nil {
 		return false, err
 	}
@@ -103,7 +79,7 @@ func isDeploymentRunnerLive(region, osStr, cpuStr, organizationID string) (bool,
 }
 
 func startOrStopDeploymentRunner(region, osStr, cpuStr, organizationId string, start bool) error {
-	asgClient, err := getAsgClient(region)
+	asgClient, err := cloud_api_clients.GetAsgClient(region)
 	if err != nil {
 		return err
 	}
@@ -124,7 +100,7 @@ func startOrStopDeploymentRunner(region, osStr, cpuStr, organizationId string, s
 		return err
 	}
 
-	ecsClient, err := getEcsClient(region)
+	ecsClient, err := cloud_api_clients.GetEcsClientFromRegion(region)
 	if err != nil {
 		return err
 	}
