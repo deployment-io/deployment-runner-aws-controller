@@ -23,3 +23,22 @@ func (r *RunnerClient) GetPendingJobsCount() (int, int, error) {
 	}
 	return jobsDto.Count, jobsDto.RunnerOnTimeoutSeconds, nil
 }
+
+func (r *RunnerClient) GetPendingSaasJobsCount() (int, int, error) {
+	if !r.isConnected {
+		return 0, 0, ErrConnection
+	}
+	args := jobs.SaasJobsCountArgsV1{}
+	args.OrganizationID = r.organizationID
+	args.Token = r.token
+	args.CloudAccountID = r.awsAccountID
+	args.RunnerRegion = r.runnerRegion
+	args.GoArch = runtime.GOARCH
+	args.GoOS = runtime.GOOS
+	var jobsDto jobs.SaasJobsCountDtoV1
+	err := r.c.Call("Jobs.GetPendingForSaasCountV1", args, &jobsDto)
+	if err != nil {
+		return 0, 0, err
+	}
+	return jobsDto.Count, jobsDto.RunnerOnTimeoutSeconds, nil
+}
