@@ -13,7 +13,7 @@ import (
 )
 
 func GetEnvironment() (service, organizationId, token, region, dockerImage, dockerRunnerImage, memory,
-	taskExecutionRoleArn, taskRoleArn, awsAccountID string) {
+	taskExecutionRoleArn, taskRoleArn, awsAccountID, bedrockRoleArn string) {
 	//load .env ignoring err
 	_ = godotenv.Load()
 	organizationId = os.Getenv("OrganizationID")
@@ -26,6 +26,10 @@ func GetEnvironment() (service, organizationId, token, region, dockerImage, dock
 	taskExecutionRoleArn = os.Getenv("ExecutionRoleArn")
 	taskRoleArn = os.Getenv("TaskRoleArn")
 	awsAccountID = os.Getenv("AWSAccountID")
+	//Bedrock (Phase 8): ARN of the runner's Bedrock-only role. Carried through so the
+	//aws-controller re-registers it on the runner task definition during auto-upgrade;
+	//otherwise the runner loses BedrockRoleArn after the first upgrade and Bedrock breaks.
+	bedrockRoleArn = os.Getenv("BedrockRoleArn")
 	return
 }
 

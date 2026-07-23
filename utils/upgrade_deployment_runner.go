@@ -41,13 +41,32 @@ func (u *UpgradeDataType) Get() (runnerUpgradeDockerImage, controllerUpgradeDock
 
 var UpgradeData = UpgradeDataType{}
 
-func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, organizationId, token, region, dockerImage,
-	osStr, cpuStr, memory, taskExecutionRoleArn, taskRoleArn, awsAccountID string) (taskDefinitionArn string, err error) {
+// RunnerTaskDefinitionConfig groups the runner task-definition parameters so the
+// upgrade path stays within the repo's four-parameter limit (see CLAUDE.md Rule 2.3).
+type RunnerTaskDefinitionConfig struct {
+	Service              string
+	OrganizationID       string
+	Token                string
+	Region               string
+	DockerImage          string
+	OsStr                string
+	CpuStr               string
+	Memory               string
+	TaskExecutionRoleArn string
+	TaskRoleArn          string
+	AWSAccountID         string
+	// BedrockRoleArn is the runner's Bedrock-only role ARN. It must be re-registered
+	// on the runner task definition during auto-upgrade, otherwise the runner loses it
+	// after the first upgrade and Bedrock silently stops working.
+	BedrockRoleArn string
+}
 
-	osCpuStr := fmt.Sprintf("%s%s", osStr, cpuStr)
-	runnerName := fmt.Sprintf("dr-%s-%s-%s", osCpuStr, organizationId, region)
+func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, runnerCfg RunnerTaskDefinitionConfig) (taskDefinitionArn string, err error) {
 
-	tags := strings.Split(dockerImage, ":")
+	osCpuStr := fmt.Sprintf("%s%s", runnerCfg.OsStr, runnerCfg.CpuStr)
+	runnerName := fmt.Sprintf("dr-%s-%s-%s", osCpuStr, runnerCfg.OrganizationID, runnerCfg.Region)
+
+	tags := strings.Split(runnerCfg.DockerImage, ":")
 	tag := "unknown"
 	if len(tags) == 2 {
 		tag = tags[1]
@@ -59,39 +78,45 @@ func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, orga
 	envVars := []ecsTypes.KeyValuePair{
 		{
 			Name:  aws.String("Token"),
-			Value: aws.String(token),
+			Value: aws.String(runnerCfg.Token),
 		},
 		{
 			Name:  aws.String("OrganizationID"),
-			Value: aws.String(organizationId),
+			Value: aws.String(runnerCfg.OrganizationID),
 		},
 		{
 			Name:  aws.String("Service"),
-			Value: aws.String(service),
+			Value: aws.String(runnerCfg.Service),
 		},
 		{
 			Name:  aws.String("DockerImage"),
-			Value: aws.String(dockerImage),
+			Value: aws.String(runnerCfg.DockerImage),
 		},
 		{
 			Name:  aws.String("Region"),
-			Value: aws.String(region),
+			Value: aws.String(runnerCfg.Region),
 		},
 		{
 			Name:  aws.String("Memory"),
-			Value: aws.String(memory),
+			Value: aws.String(runnerCfg.Memory),
 		},
 		{
 			Name:  aws.String("ExecutionRoleArn"),
-			Value: aws.String(taskExecutionRoleArn),
+			Value: aws.String(runnerCfg.TaskExecutionRoleArn),
 		},
 		{
 			Name:  aws.String("TaskRoleArn"),
-			Value: aws.String(taskRoleArn),
+			Value: aws.String(runnerCfg.TaskRoleArn),
 		},
 		{
 			Name:  aws.String("AWSAccountID"),
-			Value: aws.String(awsAccountID),
+			Value: aws.String(runnerCfg.AWSAccountID),
+		},
+		{
+			//Bedrock (Phase 8): mirror the ARN set by the CloudFormation runner task
+			//definition so it survives auto-upgrade re-registration.
+			Name:  aws.String("BedrockRoleArn"),
+			Value: aws.String(runnerCfg.BedrockRoleArn),
 		},
 	}
 
@@ -99,14 +124,14 @@ func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, orga
 		DisableNetworking: aws.Bool(false),
 		Environment:       envVars,
 		Essential:         aws.Bool(true),
-		Image:             aws.String(dockerImage),
+		Image:             aws.String(runnerCfg.DockerImage),
 		Interactive:       aws.Bool(false),
 		LogConfiguration: &ecsTypes.LogConfiguration{
 			LogDriver: ecsTypes.LogDriverAwslogs,
 			Options: map[string]string{
 				"awslogs-create-group":  "true",
 				"awslogs-group":         logGroupName,
-				"awslogs-region":        region,
+				"awslogs-region":        runnerCfg.Region,
 				"awslogs-stream-prefix": logsStreamPrefix,
 			},
 		},
@@ -130,12 +155,12 @@ func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, orga
 
 	cpuArch := ecsTypes.CPUArchitectureX8664
 
-	if cpuStr == "arm" {
+	if runnerCfg.CpuStr == "arm" {
 		cpuArch = ecsTypes.CPUArchitectureArm64
 	}
 
 	osFamily := ecsTypes.OSFamilyLinux
-	if osStr == "windows" {
+	if runnerCfg.OsStr == "windows" {
 		osFamily = ecsTypes.OSFamilyWindowsServer2022Core
 	}
 
@@ -143,9 +168,9 @@ func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, orga
 		ContainerDefinitions: []ecsTypes.ContainerDefinition{
 			containerDefinition,
 		},
-		ExecutionRoleArn: aws.String(taskExecutionRoleArn),
+		ExecutionRoleArn: aws.String(runnerCfg.TaskExecutionRoleArn),
 		Family:           aws.String(taskDefinitionFamilyName),
-		Memory:           aws.String(memory),
+		Memory:           aws.String(runnerCfg.Memory),
 		NetworkMode:      ecsTypes.NetworkModeHost,
 		RuntimePlatform: &ecsTypes.RuntimePlatform{
 			CpuArchitecture:       cpuArch,
@@ -161,7 +186,7 @@ func registerDeploymentRunnerTaskDefinition(ecsClient *ecs.Client, service, orga
 				Value: aws.String("deployment.io"),
 			},
 		},
-		TaskRoleArn: aws.String(taskRoleArn),
+		TaskRoleArn: aws.String(runnerCfg.TaskRoleArn),
 		Volumes: []ecsTypes.Volume{
 			{
 				Host: &ecsTypes.HostVolumeProperties{SourcePath: aws.String("/var/run/docker.sock")},
@@ -213,34 +238,35 @@ func updateDeploymentRunnerService(ecsClient *ecs.Client, organizationId, osStr,
 	return err
 }
 
-func UpgradeDeploymentRunner(service, organizationId, token, region, runnerDockerImage, osStr, cpuStr, memory, taskExecutionRoleArn, taskRoleArn, awsAccountID string) (string, error) {
+func UpgradeDeploymentRunner(runnerCfg RunnerTaskDefinitionConfig) (string, error) {
+	currentDockerImage := runnerCfg.DockerImage
 	runnerUpgradeDockerImage, _, upgradeFromTs, upgradeToTs := UpgradeData.Get()
 	now := time.Now().Unix()
 	if now > upgradeFromTs && now < upgradeToTs {
-		if len(runnerUpgradeDockerImage) > 0 && runnerDockerImage != runnerUpgradeDockerImage {
+		if len(runnerUpgradeDockerImage) > 0 && currentDockerImage != runnerUpgradeDockerImage {
 			//upgrade deployment runner to upgraded image
-			cfg, err := config.LoadDefaultConfig(context.TODO())
+			awsCfg, err := config.LoadDefaultConfig(context.TODO())
 			if err != nil {
-				return runnerDockerImage, err
+				return currentDockerImage, err
 			}
-			ecsClient := ecs.NewFromConfig(cfg, func(o *ecs.Options) {
-				o.Region = region
+			ecsClient := ecs.NewFromConfig(awsCfg, func(o *ecs.Options) {
+				o.Region = runnerCfg.Region
 			})
 
-			//register new task definition
-			taskDefinitionArn, err := registerDeploymentRunnerTaskDefinition(ecsClient, service, organizationId, token,
-				region, runnerUpgradeDockerImage, osStr, cpuStr, memory, taskExecutionRoleArn, taskRoleArn, awsAccountID)
+			//register new task definition with the upgraded image
+			runnerCfg.DockerImage = runnerUpgradeDockerImage
+			taskDefinitionArn, err := registerDeploymentRunnerTaskDefinition(ecsClient, runnerCfg)
 			if err != nil {
-				return runnerDockerImage, err
+				return currentDockerImage, err
 			}
 
 			//update service
-			err = updateDeploymentRunnerService(ecsClient, organizationId, osStr, cpuStr, taskDefinitionArn, region)
+			err = updateDeploymentRunnerService(ecsClient, runnerCfg.OrganizationID, runnerCfg.OsStr, runnerCfg.CpuStr, taskDefinitionArn, runnerCfg.Region)
 			if err != nil {
-				return runnerDockerImage, err
+				return currentDockerImage, err
 			}
 			return runnerUpgradeDockerImage, nil
 		}
 	}
-	return runnerDockerImage, nil
+	return currentDockerImage, nil
 }
