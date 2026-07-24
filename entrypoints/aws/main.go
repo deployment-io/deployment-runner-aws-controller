@@ -35,7 +35,7 @@ func main() {
 	//}
 
 	service, organizationId, token, region, dockerImage, runnerDockerImage, memory, taskExecutionRoleArn,
-		taskRoleArn, awsAccountID := common.GetEnvironment()
+		taskRoleArn, awsAccountID, bedrockRoleArn := common.GetEnvironment()
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		log.Fatal(err)
@@ -118,8 +118,20 @@ func main() {
 			} else {
 				if noPendingJobs {
 					//no pending jobs - upgrade deployment runner to upgraded image
-					runnerDockerImage, err = utils.UpgradeDeploymentRunner(service, organizationId, token, region, runnerDockerImage,
-						osStr, cpuStr, memory, taskExecutionRoleArn, taskRoleArn, awsAccountID)
+					runnerDockerImage, err = utils.UpgradeDeploymentRunner(utils.RunnerTaskDefinitionConfig{
+						Service:              service,
+						OrganizationID:       organizationId,
+						Token:                token,
+						Region:               region,
+						DockerImage:          runnerDockerImage,
+						OsStr:                osStr,
+						CpuStr:               cpuStr,
+						Memory:               memory,
+						TaskExecutionRoleArn: taskExecutionRoleArn,
+						TaskRoleArn:          taskRoleArn,
+						AWSAccountID:         awsAccountID,
+						BedrockRoleArn:       bedrockRoleArn,
+					})
 					if err != nil {
 						fmt.Println(err.Error())
 					}
