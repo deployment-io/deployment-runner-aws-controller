@@ -1,10 +1,12 @@
 module github.com/deployment-io/deployment-runner-aws-controller
 
-go 1.20
+go 1.24
+
+toolchain go1.24.0
 
 require (
 	github.com/ankit-arora/go-utils v0.0.0-20230703175629-90641e500c7c
-	github.com/aws/aws-sdk-go-v2 v1.30.3
+	github.com/aws/aws-sdk-go-v2 v1.43.3
 	github.com/aws/aws-sdk-go-v2/config v1.27.11
 	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.40.5
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.41.7
@@ -38,7 +40,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/servicediscovery v1.31.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.20.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.23.4 // indirect
-	github.com/aws/smithy-go v1.20.3 // indirect
+	github.com/aws/smithy-go v1.27.6 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	go.mongodb.org/mongo-driver v1.14.0 // indirect
 )
