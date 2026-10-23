@@ -1,8 +1,8 @@
 module github.com/deployment-io/deployment-runner-aws-controller
 
-go 1.25.0
+go 1.26.0
 
-toolchain go1.25.14
+toolchain go1.27.3
 
 require (
 	github.com/ankit-arora/go-utils v0.0.0-20230703175629-90641e500c7c
