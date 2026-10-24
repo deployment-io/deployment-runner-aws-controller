@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/autoscaling v1.40.5
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.41.7
 	github.com/aws/aws-sdk-go-v2/service/sts v1.28.6
-	github.com/deployment-io/deployment-runner-kit v0.0.0-20261023062427-88cbedca9de4
+	github.com/deployment-io/deployment-runner-kit v0.0.0-20261024103631-16f356ef30fe
 	github.com/joho/godotenv v1.5.1
 )
 
