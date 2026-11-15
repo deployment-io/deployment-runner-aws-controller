@@ -89,6 +89,7 @@ func main() {
 	})
 	shutdown := false
 	jobs.RegisterGobDataTypes()
+	controllerSelfUpdater := utils.NewControllerSelfUpdater(region, dockerImage)
 
 	for !shutdown {
 		select {
@@ -135,6 +136,8 @@ func main() {
 					if err != nil {
 						fmt.Println(err.Error())
 					}
+					//no pending jobs and runner stopped - update the controller itself to the upgraded image
+					controllerSelfUpdater.MaybeSelfUpdate(runnerDockerImage)
 				} else {
 					//switch on
 					err = common.StartOrStopDeploymentRunner(region, osStr, cpuStr, organizationId, true)
